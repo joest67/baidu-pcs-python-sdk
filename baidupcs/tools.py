@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import requests
+import time
 
 
 def get_new_access_token(refresh_token, client_id, client_secret,
@@ -29,8 +30,71 @@ def get_new_access_token(refresh_token, client_id, client_secret,
         'refresh_token': refresh_token,
         'client_id': client_id,
         'client_secret': client_secret,
+        'scope': 'netdisk',
     }
     if scope:
         data['scope'] = scope
     url = 'https://openapi.baidu.com/oauth/2.0/token'
     return requests.post(url, data=data)
+
+
+def create_access_token(client_id, client_secret, scope=None):
+    """
+    1. call tools.create_access_token(`client_id`, `client_secret`)
+    2. open website `http://openapi.baidu.com/device` in browser
+    3. enter code `xxx`, click authorized
+    """
+
+    data = {
+        'response_type': 'device_code',
+        'client_id': client_id,
+        'client_secret': client_secret,
+    }
+    if scope:
+        data['scope'] = scope
+    url = 'https://openapi.baidu.com/oauth/2.0/device/code'
+    enter_code_website = 'http://openapi.baidu.com/device'
+    retries = 10
+    res = requests.post(url, data=data)
+    if res.status_code / 100 == 2:
+        res = res.json()
+
+    if res and res.get('user_code'):
+        user_code = res.get('user_code')
+        device_code = res.get('device_code')
+        expires_in = res.get('expires_in')
+        interval = res.get('interval')
+        print '\nopen {}, enter the user_code {} in {}s\n'.format(
+            enter_code_website, user_code, expires_in)
+    else:
+        raise Exception('Get user_code error {}, {}'.format(res['error'], res['error_description']))
+
+    while retries > 0:
+        res = check_authentication(device_code, client_id, client_secret)
+        if 'access_token' in res:
+            access_token = res['access_token']
+            refresh_token = res['refresh_token']
+            print 'success: access_token={}, refresh_token={}'.format(
+                access_token, refresh_token)
+
+            return access_token, refresh_token
+        else:
+            error_msg = 'Get access_token error {}, {}\n'.format(res['error'], res['error_description'])
+            if retries > 1:
+                retries -= 1
+                print error_msg
+            else:
+                raise Exception(error_msg)
+        time.sleep(interval + 5)
+
+
+def check_authentication(device_code, client_id, client_secret):
+    data = {
+        'grant_type': 'device_token',
+        'code': device_code,
+        'client_id': client_id,
+        'client_secret': client_secret,
+    }
+    url = 'https://openapi.baidu.com/oauth/2.0/token'
+    res = requests.post(url, data=data)
+    return res.json()
